@@ -2,7 +2,7 @@
 
 
 
-
+import os
 
 from sklearn.model_selection import train_test_split
 
@@ -27,12 +27,14 @@ from sklearn.pipeline import Pipeline
 
 from sklearn import metrics
 
-from sklearn.linear_model import LogisticRegression
+from sklearn.svm import LinearSVC
 
 from sklearn.model_selection import cross_validate
 from sklearn.model_selection import cross_val_predict
 
 from sklearn.metrics import f1_score
+
+from sklearn import linear_model
 
 import csv
 
@@ -53,6 +55,34 @@ import json
 #import re
 
 #from bs4 import BeautifulSoup
+
+
+def batches(l, n):
+    for i in range(0, len(l), n):
+        yield l[i:i+n]
+        
+def fn_progress(cls_name, stats):
+    """Report progress information, return a string."""
+    duration = time.time() - stats['t0']
+    s = "%20s classifier : \t" % cls_name
+    #s += "%(n_train)6d train docs (%(n_train_pos)6d positive) " % stats
+    s += "%(n_train)6d train docs " % stats
+    #s += "%(n_test)6d test docs (%(n_test_pos)6d positive) " % test_stats
+    s += "accuracy: %(accuracy).6f " % stats
+    s += "in %.2fs (%5d docs/s)" % (duration, stats['n_train'] / duration)
+    return s
+
+
+
+#print(os.listdir("../input/yelp-imdb-multi-class/datasets/datasets/"))
+
+
+b_do_kaggle = False
+#b_do_kaggle = True
+
+
+
+
 
 
 i_cross_validation_fold_count = 5
@@ -90,14 +120,14 @@ b_separate_wp = True
 
 
 
-i_partial_count = 1000
+i_partial_count = 5000
 
 
 b_do_model_selection = False
 #b_do_model_selection = True
 
-#b_do_cross_validation = False
-b_do_cross_validation = True
+b_do_cross_validation = False
+#b_do_cross_validation = True
 
 
 #b_use_new_data_set = False
@@ -106,7 +136,18 @@ b_use_new_data_set = True
 #b_use_new_data_IMDB_or_YELP = True
 b_use_new_data_IMDB_or_YELP = False
 
-logging.config.fileConfig('logging.conf')
+
+s_log_config_fn = "logging.conf"
+
+
+if b_do_kaggle:
+    s_log_config_fn = "../input/config/" + s_log_config_fn
+
+logging.config.fileConfig(s_log_config_fn)
+
+
+
+
 
 # create logger
 logger = logging.getLogger('Project2Group12')
@@ -169,15 +210,22 @@ b_use_original_text = True
 #str_fn_postfix = "_cleanup_negate_w_lemmatize_w_nwn_w_swf_w_separate_wp_stat_simplified"
 
 
+
+
 str_json_fn_training = "../" + "training" + "_set" + str_fn_postfix + ".json"
 
+
+str_input_folder = "../../../"
+
+if b_do_kaggle:
+    str_input_folder = "../input/yelp-imdb-multi-class/datasets/"
 
 if b_use_new_data_set:
     
     if b_use_new_data_IMDB_or_YELP:
-        str_json_fn_training = "../../../datasets/JMARS_10_label_imdb_dataset/data/data.json"
+        str_json_fn_training = str_input_folder + "datasets/JMARS_10_label_imdb_dataset/data/data.json"
     else:   
-        str_json_fn_training = "../../../datasets/Zhang_5_label_yelp_dataset/data/data.json"
+        str_json_fn_training = str_input_folder + "datasets/Zhang_5_label_yelp_dataset/data/data.json"
     
 
 
@@ -186,9 +234,9 @@ str_json_fn_testing = "../" + "testing" + "_set" + str_fn_postfix + ".json"
 if b_use_new_data_set:
     
     if b_use_new_data_IMDB_or_YELP:
-        str_json_fn_testing = "../../../datasets/JMARS_10_label_imdb_dataset/data/data.json"
+        str_json_fn_testing = str_input_folder + "datasets/JMARS_10_label_imdb_dataset/data/data.json"
     else:   
-        str_json_fn_testing = "../../../datasets/Zhang_5_label_yelp_dataset/data/data.json"
+        str_json_fn_testing = str_input_folder + "datasets/Zhang_5_label_yelp_dataset/data/data.json"
 
 
 logger.info("str_json_fn_training = %s \n", str_json_fn_training)
@@ -224,7 +272,7 @@ else:
     else:
         real_training_data_set = sorted(json_data, key=lambda x: (x['id']), reverse=False)    
         real_training_data_set = [item for item in real_training_data_set[:i_partial_count] if item['y_val'] > -2]
-    
+      
     
 #real_training_data_set_sorted = sorted(real_training_data_set, key=lambda x: (x['id']), reverse=False)
 real_training_data_set_sorted = real_training_data_set
@@ -238,7 +286,7 @@ tmp_list_Y_raw = []
 
 
 for data_point in real_training_data_set_sorted:
-    
+	
 
     i_se = 0
     #i_se = data_point['i_sentiment_estimate']
@@ -361,7 +409,7 @@ tmp_pure_files_list_raw = []
 
 
 for data_point in real_testing_data_set_sorted:
-    
+	
     #tmp_list_X_raw.append(data_point['senti_text'])
     
     i_se = 0
@@ -406,7 +454,7 @@ for data_point in real_testing_data_set_sorted:
     tmp_list_X_raw.append(str_st)
 
     #tmp_list_Y_raw.append(data_point['y_val'])
-    
+	
     if b_use_new_data_set:
         tmp_list_Y_raw.append(data_point['rating'])
         
@@ -527,24 +575,73 @@ print("len of X_train and Y_train", len(X_train), len(Y_train))
 
 
 
+logger.info("start CountVectorizer. ")
 
+vect = CountVectorizer(min_df=2, max_df=1.0, max_features=None, strip_accents='unicode', analyzer='word', token_pattern=r'\w{1,}', ngram_range=(1, 4))
+
+count_vect = vect.fit(X_train)
+
+X_train_counts = count_vect.transform(X_train)
+X_test_counts = count_vect.transform(X_test)
+
+logger.info("end CountVectorizer. ")
+
+
+
+
+logger.info("start TfidfTransformer. ")
+
+tfidf = TfidfTransformer(use_idf=b_Tfidf_or_BOW, smooth_idf=b_Tfidf_or_BOW, sublinear_tf=b_Tfidf_or_BOW)
+
+tfidf_transformer = tfidf.fit(X_train_counts)
+
+X_train_tfidf = tfidf_transformer.transform(X_train_counts)
+X_test_tfidf = tfidf_transformer.transform(X_test_counts)
+
+
+logger.info("end TfidfTransformer. ")
+
+
+
+logger.info("start Normalizer. ")
+
+norm = Normalizer()
+
+normalizer_tranformer = norm.fit(X_train_tfidf)
+X_train_normalized = normalizer_tranformer.transform(X_train_tfidf)
+X_test_normalized = normalizer_tranformer.transform(X_test_tfidf)
+
+
+logger.info("end Normalizer. ")
+
+
+
+#clf = LinearSVC(C=1.0, random_state=10, tol=1e-05, max_iter=1000)
+
+#.fit(X_train_normalized, y_train)
+
+clf = linear_model.SGDClassifier(shuffle=True, loss='hinge', penalty = 'l2', random_state=0, early_stopping=False, validation_fraction=0.1, n_iter_no_change=10, max_iter=1000, tol=1e-05)
+
+
+
+
+
+"""
 
 pclf = Pipeline([
     #('vect', CountVectorizer(min_df=2, max_features=None, strip_accents='unicode', analyzer='word', token_pattern=r'\w{1,}', ngram_range=(1, 4), stop_words = 'english')),
     #('vect', CountVectorizer(min_df=2, max_features=None, strip_accents='unicode', analyzer='word', token_pattern=r'\w{1,}', ngram_range=(1, 4))),
     #('vect', CountVectorizer(min_df=0.0002, max_df=1.0, max_features=None, strip_accents='unicode', analyzer='word', token_pattern=r'\w{1,}', ngram_range=(1, 4))),
-    #('vect', CountVectorizer(min_df=0.0002, max_df=1.0, max_features=None, strip_accents='unicode', analyzer='word', token_pattern=r'\w{1,}', ngram_range=(1, 4))),
-    ('vect', CountVectorizer(min_df=0.0002, max_df=1.0, max_features=None, strip_accents='unicode', analyzer='word', token_pattern=r'\w{1,}', ngram_range=(1, 3))),
-    #('vect', CountVectorizer(min_df=0.0, max_df=1.0, max_features=None, strip_accents='unicode', analyzer='word', token_pattern=r'\w{1,}', ngram_range=(1, 1))),
-    #('tfidf', TfidfTransformer(use_idf=False, smooth_idf=False, sublinear_tf=False)),
+    #('vect', CountVectorizer(min_df=1, max_df=1.0, max_features=None, strip_accents='unicode', analyzer='word', token_pattern=r'\w{1,}', ngram_range=(1, 4))),
+    #('vect', CountVectorizer(min_df=2, max_df=1.0, max_features=None, strip_accents='unicode', analyzer='word', token_pattern=r'\w{1,}', ngram_range=(1, 4))),
+    ('vect', CountVectorizer(min_df=2, max_df=1.0, max_features=None, strip_accents='unicode', analyzer='word', token_pattern=r'\w{1,}', ngram_range=(1, 4))),
     ('tfidf', TfidfTransformer(use_idf=b_Tfidf_or_BOW, smooth_idf=b_Tfidf_or_BOW, sublinear_tf=b_Tfidf_or_BOW)),
     ('norm', Normalizer()),
-    #('clf', LogisticRegression(penalty = 'l2', dual = False, random_state = 0, solver='sag', C=20, max_iter=1000, multi_class='multinomial')),
-    ('clf', LogisticRegression(penalty = 'l2', dual = True, random_state = 0, solver='liblinear', C=20, max_iter=1000, multi_class='auto')),
-    #('clf', LogisticRegression(penalty = 'l2', dual = True, random_state = 0, solver='liblinear', C=20, max_iter=1000, multi_class='auto')),
+    #('clf', LinearSVC(C=1.0, random_state=10, tol=1e-05, max_iter=5000)),
+    ('clf', linear_model.SGDClassifier(shuffle=True, loss='hinge', penalty = 'l2', random_state=0, early_stopping=True, validation_fraction=0.1, n_iter_no_change=10, max_iter=1000, tol=1e-05)),
 ])
     
-
+"""
 
     
     
@@ -553,9 +650,15 @@ pclf = Pipeline([
 #pclf.fit(X_train, Y_train)
     
     
+"""
+params = {"clf__C":[0.1, 1.0, 10.0, 100.0]
 
-#params = {"C":[1, 4, 16, 32]
-#}
+}
+"""
+
+
+params = {"clf__C":[1.0]
+}
 
     
 """ 
@@ -566,12 +669,11 @@ params = {"vect__ngram_range": [(1,4)],
 }
 """
 
-"""
-params = { 
-          "vect_max_df" : [0.5, 0.6, 0.7, 0.8]
+  
+#params = { 
+#          "vect_max_df" : [0.5, 0.6, 0.7, 0.8]
 
-}
-"""
+#}
 
 
 """ 
@@ -591,13 +693,31 @@ params = {"clf__C": [1, 4, 16, 32]
 }
 """
 
-params = {"clf__C": [20]
+#model_search_SVM = GridSearchCV(pclf, param_grid = params, scoring = 'roc_auc', cv = 5, verbose = 10, error_score='raise', iid=True, n_jobs=2)
+model_search_SVM = GridSearchCV(clf, param_grid = params, scoring = 'roc_auc', cv = 5, verbose = 10, error_score='raise', iid=True, n_jobs=2)
+
+
+partial_fit_classifiers = {
+    'SGD_SVM': 0,
+    #'Perceptron': Perceptron(tol=1e-3),
+    #'NB Multinomial': MultinomialNB(alpha=0.01),
+    #'Passive-Aggressive': PassiveAggressiveClassifier(tol=1e-3),
 }
 
 
-model_search_LR = GridSearchCV(pclf, param_grid = params, scoring = 'roc_auc', cv = 5, verbose = 10, error_score='raise', iid=True, n_jobs=2)
+cls_stats = {}
+
+for cls_name in partial_fit_classifiers:
+    stats = {'n_train': 0, 'n_train_pos': 0,
+             'accuracy': 0.0, 'accuracy_history': [(0, 0)], 't0': time.time(),
+             'runtime_history': [(0, 0)], 'total_fit_time': 0.0}
+    
+    cls_stats[cls_name] = stats
 
 
+best_clf = None
+
+Y_test_pred_best = []
 
 
 st = int(time.time())
@@ -605,11 +725,11 @@ st = int(time.time())
 logger.info("start fit for pclf")
 
 if b_do_model_selection:
-
+   
     with warnings.catch_warnings(record=True) as w:
         try:
             #gs.fit(X, y)   # This will raise a ValueError since C is < 0        
-            model_search_LR.fit(X_train_whole, Y_train_whole) # Fit the model.
+            model_search_SVM.fit(X_train_whole, Y_train_whole) # Fit the model.
             #model_search_LR.fit(X_train, Y_train) # Fit the model.
         except Exception as e:
             #except ValueError:
@@ -623,25 +743,25 @@ if b_do_model_selection:
     #error_score=np.nan
     
     
-    print("\n\n model_search_LR.scorer_ = \n", model_search_LR.scorer_) 
+    print("\n\n model_search_SVM.scorer_ = \n", model_search_SVM.scorer_) 
     
-    print("\n\n model_search_LR.best_index_ = \n", model_search_LR.best_index_) 
+    print("\n\n model_search_SVM.best_index_ = \n", model_search_SVM.best_index_) 
     
-    print("\n\n model_search_LR.best_score_ = \n", model_search_LR.best_score_)                        
+    print("\n\n model_search_SVM.best_score_ = \n", model_search_SVM.best_score_)                        
     
-    print("\n\n model_search_LR.best_params_ = \n", model_search_LR.best_params_)
+    print("\n\n model_search_SVM.best_params_ = \n", model_search_SVM.best_params_)
     
-    print("\n\n model_search_LR.best_estimator_ = \n", model_search_LR.best_estimator_)
+    print("\n\n model_search_SVM.best_estimator_ = \n", model_search_SVM.best_estimator_)
     
     
-    print("\n\n model_search_LR.cv_results_ = \n", model_search_LR.cv_results_)
-
+    print("\n\n model_search_SVM.cv_results_ = \n", model_search_SVM.cv_results_)
+   
 
 else:
     
     if b_do_cross_validation:
         
-        cv_results = cross_validate(pclf, X_train_whole, Y_train_whole, scoring='f1_weighted', cv=i_cross_validation_fold_count, n_jobs=1, return_train_score=False, verbose=10)
+        cv_results = cross_validate(clf, X_train_whole, Y_train_whole, scoring='f1_weighted', cv=i_cross_validation_fold_count, n_jobs=1, return_train_score=False, verbose=10)
     
         logger.info(sorted(cv_results.keys()))
     
@@ -660,12 +780,133 @@ else:
         
     else:
         
+        print("X_train_normalized:", X_train_normalized.shape, "\n")
+        
+        
+        cls_classes = np.unique(Y_train)
+        
+        print("cls_classes = ", cls_classes , "\n")
+        
+        i_total_train_len = X_train_normalized.shape[0]
+        
+        i_mini_batch_size = 20000
+        i_n_iter_no_change_before_early_stopping = 10
+        
         #pclf.fit(X_train_whole, Y_train_whole)
-        pclf.fit(X_train, Y_train)
-    
+        #pclf.fit(X_train, Y_train)
+        #clf.fit(X_train, Y_train)
+        
+        #clf.fit(X_train_normalized, Y_train)
+        #clf2 = SGDClassifier(shuffle=True, loss='log')
+        
+        
+        
+        cls_name = "SGD_SVM"
+        
+        total_vect_time = 0.0
+        
+        overall_best_score = 0.0
+        
+        i_n_iter_no_improve = 0
+        
+        i_current_iter = 0
+        
+        n_iter = 100
+        for n in range(n_iter):
+            
+            cur_iter_best_score = 0.0
+            
+            best_iter_clf = None
+            
+            Y_test_pred_best_cur_iter = []
+            
+            for mini_batch in batches(range(i_total_train_len), i_mini_batch_size):
+                                
+                #logger.info(" start partial_fit for clf")
+                
+                tick = time.time()
+                
+                x_train_batch = X_train_normalized[mini_batch[0]:mini_batch[-1]+1]
+                y_train_batch = Y_train[mini_batch[0]:mini_batch[-1]+1]
+                
+                total_vect_time += time.time() - tick
+                
+                
+                #print("mini_batch:",  mini_batch[0], " to ", mini_batch[-1], "\n")
+                
+                tick = time.time()               
+                
+                
+                clf.partial_fit(x_train_batch, y_train_batch, classes=cls_classes)
+
+                #logger.info(" end partial_fit for clf")
+                cls_stats[cls_name]['total_fit_time'] += time.time() - tick
+                cls_stats[cls_name]['n_train'] += x_train_batch.shape[0]
+                cls_stats[cls_name]['n_train_pos'] += sum(y_train_batch)
+                
+                tick = time.time()
+                
+                current_score = clf.score(X_test_normalized, Y_test)
+                
+                if cur_iter_best_score < current_score:
+                    cur_iter_best_score = current_score
+                    
+                    #best_iter_clf = clf
+                    Y_test_pred_best_cur_iter = []
+                    Y_test_pred_best_cur_iter = clf.predict(X_test_normalized)
+                    
+                    
+                    
+                    #print("updated cur_iter_best_score = ", cur_iter_best_score, "\n")
+                    
+                    
+                cls_stats[cls_name]['accuracy'] = current_score
+                
+                
+                
+                cls_stats[cls_name]['prediction_time'] = time.time() - tick
+                
+                acc_history = (cls_stats[cls_name]['accuracy'],
+                               cls_stats[cls_name]['n_train'])
+                
+                cls_stats[cls_name]['accuracy_history'].append(acc_history)
+                
+                run_history = (cls_stats[cls_name]['accuracy'], total_vect_time + cls_stats[cls_name]['total_fit_time'])
+                
+                cls_stats[cls_name]['runtime_history'].append(run_history)
+                
+            
+            i_current_iter += 1
+            
+                     
+            if i_current_iter % 1 == 0:
+                logger.info("i_current_iter = %d : %s ", i_current_iter, fn_progress(cls_name, cls_stats[cls_name]))
+                #print(, "\n")
 
 
-logger.info("\n end fit for pclf")
+            if overall_best_score < cur_iter_best_score:
+                overall_best_score = cur_iter_best_score
+                
+                #best_clf = best_iter_clf
+                
+                Y_test_pred_best = []
+                Y_test_pred_best = Y_test_pred_best_cur_iter.copy()
+                
+                print("updated overall_best_score = ", overall_best_score, "\n")
+                
+                i_n_iter_no_improve = 0
+                
+            else:
+                i_n_iter_no_improve += 1
+                
+                if i_n_iter_no_improve >= i_n_iter_no_change_before_early_stopping:
+                    logger.info(" early stop due to no improvement within recent %d iters \n", i_n_iter_no_change_before_early_stopping)
+                    break
+             
+
+
+
+logger.info(" end fit for pclf")
 
 
 
@@ -688,13 +929,14 @@ tmp_fns = []
 
 
 if b_do_model_selection:
-    tmp_fns = model_search_LR.best_estimator_.named_steps['vect'].get_feature_names()
+    tmp_fns = model_search_SVM.best_estimator_.named_steps['vect'].get_feature_names()
 else:
     
     if b_do_cross_validation:
         pass
     else:
-        tmp_fns = pclf.named_steps['vect'].get_feature_names()
+        #tmp_fns = clf.named_steps['vect'].get_feature_names()
+        tmp_fns = vect.get_feature_names()
 
 i_len_fns = len(tmp_fns)
 
@@ -712,8 +954,8 @@ print("\n\n\n\n i_len_fns = ", i_len_fns, type(tmp_fns))
 tmp_idfs = []
 
 if b_do_model_selection:
-
-    tmp_idfs = model_search_LR.best_estimator_.named_steps['tfidf'].idf_
+    
+    tmp_idfs = model_search_SVM.best_estimator_.named_steps['tfidf'].idf_
 else:
     
     tmp_idfs = pclf.named_steps['tfidf'].idf_
@@ -731,10 +973,10 @@ tmp_coefs = []
 
 if b_do_model_selection:
     
-    tmp_coefs = model_search_LR.best_estimator_.named_steps['clf'].coef_
+    tmp_coefs = model_search_SVM.best_estimator_.named_steps['clf'].coef_
     
 else:
-    
+
     tmp_coefs = pclf.named_steps['clf'].coef_
 
 print("\n\n\n\n clf coef_", tmp_coefs, len(tmp_coefs), type(tmp_coefs), tmp_coefs.shape)
@@ -752,7 +994,7 @@ tmp_intercept = []
 
 if b_do_model_selection:
     
-    tmp_intercept = model_search_LR.best_estimator_.named_steps['clf'].intercept_
+    tmp_intercept = model_search_SVM.best_estimator_.named_steps['clf'].intercept_
     
 else:
     tmp_intercept = pclf.named_steps['clf'].intercept_
@@ -839,15 +1081,18 @@ st = int(time.time())
 
 Y_test_pred = []
 
+
+
 if b_do_model_selection:
-    Y_test_pred = model_search_LR.best_estimator_.predict(X_test)
+    Y_test_pred = model_search_SVM.best_estimator_.predict(X_test)
 else:
     if b_do_cross_validation:
         #Y_test_pred = cross_val_predict(pclf, X_train_whole, Y_train_whole, cv=i_cross_validation_fold_count)
         pass
     else:
-        Y_test_pred = pclf.predict(X_test)
+        Y_test_pred = clf.predict(X_test_normalized)
 
+        #Y_test_pred_best = best_clf.predict(X_test_normalized)
 
 
 et = int(time.time())
@@ -884,6 +1129,9 @@ if b_do_cross_validation:
     pass
 else:
     print(metrics.classification_report(Y_test, Y_test_pred, digits=5))
+    
+    print(metrics.classification_report(Y_test, Y_test_pred_best, digits=5))
+    
 
 
 #print("\n\nmetrics.classification_report for Y_test and Y_test_cv_pred \n")
@@ -893,117 +1141,7 @@ else:
 logger.info("end metrics.classification_report ")
 
 
-if b_do_cross_validation:
-    quit()
-
-
-logger.info("start predict for X_list_real_test_raw ")
-
-Y_real_test_pred = []
-
-if b_do_model_selection:
-    Y_real_test_pred = model_search_LR.best_estimator_.predict(X_list_real_test_raw)
-else:
-
-    Y_real_test_pred = pclf.predict(X_list_real_test_raw)
-
-logger.info("end predict for X_list_real_test_raw")
-
-
-
 print("\n\n\n\n")
-
-#print("Y_test = \n\n", Y_test, type(Y_test))
-
-print("\n\n\n\n")
-
-
-
-list_Y_test_pred = Y_test_pred.tolist()
-
-#print("list_Y_test_pred = \n\n", list_Y_test_pred, type(list_Y_test_pred))
-
-print("\n\n\n\n")
-
-
-#Y_test_cv_pred
-
-#list_Y_test_cv_pred = Y_test_cv_pred.tolist()
-
-#print("list_Y_test_cv_pred = \n\n", list_Y_test_cv_pred, type(list_Y_test_cv_pred))
-
-
-
-
-print("\n\n\n\n")
-
-list_Y_real_test_pred = Y_real_test_pred.tolist()
-
-
-#print("list_Y_real_test_pred = \n\n", list_Y_real_test_pred, type(list_Y_real_test_pred))
-
-
-print("\n\n\n\n")
-
-
-print("len of list_Y_real_test_pred: ", len(list_Y_real_test_pred))
-
-
-
-print("\n\n\n\n")
-
-
-
-
-
-cur_time = int(time.time())
-
-print("cur_time = ", cur_time)
-
-str_file_name_tw = "../csv/group36_" + "logistic_regression" + "_" + str(cur_time) + "_submission" + str_fn_postfix + ".csv"
-
-
-csv_stat_all_data = []
-
-i_index = 0
-
-for item_predict in list_Y_real_test_pred:
-    
-    csv_stat_item = {}
-    
-    tmp_pure_file_name = all_pure_files_list_real_test_raw[i_index]
-    wlist = tmp_pure_file_name.split('.')
-    
-    csv_stat_item['id'] = int(wlist[0])
-
-    csv_stat_item['category'] = item_predict
-    #csv_stat_item['category'] = item_predict    
-    
-    i_index += 1
-     
-    csv_stat_all_data.append(csv_stat_item)
-
-
-
-csv_set_sorted = sorted(csv_stat_all_data, key=lambda x: (x['id']), reverse=False)
-
-
-with open(str_file_name_tw, 'wt', newline='') as csvfile:
-    
-    csv_writer = csv.writer(csvfile, dialect='excel')
-    
-    
-    header = ['Id', 'Category']
-    csv_writer.writerow(header)
-    
-    for data_point in csv_set_sorted:
-        
-        row = [data_point['id'], data_point['category']]
-        #str_to_write = "\n" + str(data_point['id']) + "," + str(data_point['category'])
-        #fout_tw.write(str_to_write)
-        csv_writer.writerow(row)
-        
-    
 
 
 logger.info("program ends. ")
