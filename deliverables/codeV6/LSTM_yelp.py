@@ -50,7 +50,7 @@ b_use_new_data_set = True
 b_use_new_data_IMDB_or_YELP = False
 
 
-i_batch_size = 50
+i_batch_size = 64
 
 i_output_size = 0
 
